@@ -323,7 +323,7 @@ class SimulatorAVX final : public SimulatorBase {
 
  private:
 
-#ifdef __BMI2__
+#ifndef __BMI2__
 
   template <unsigned H>
   void ApplyGateH(const std::vector<unsigned>& qs,
@@ -823,6 +823,12 @@ class SimulatorAVX final : public SimulatorBase {
         is[k] = _mm256_load_ps(p0 + xss[k] + 8);
       }
 
+      printf("start index = %d\n", 2 * ii);
+      printf("indices accessed: ");
+      for (unsigned j = 0; j < hsize; j++) {
+        printf("%d, ", 2 * ii + xss[j]);
+      }
+      printf("\n");
       uint64_t j = 0;
 
       for (unsigned k = 0; k < hsize; ++k) {

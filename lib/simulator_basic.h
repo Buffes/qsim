@@ -19,10 +19,12 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include <stdio.h>
 
 #include "simulator.h"
 #include "statespace_basic.h"
 
+static int test_counter = 0;
 namespace qsim {
 
 /**
@@ -161,20 +163,27 @@ class SimulatorBasic final : public SimulatorBase {
   template <unsigned H>
   void ApplyGateH(const std::vector<unsigned>& qs,
                   const fp_type* matrix, State& state) const {
+    // n = num_threads
+    // m = current_thread
+    // i = current_iteration
+    // v = gate_matrix
+    // ms = table of masks
+    // xss = table of offset indices
+    // rstate = state_vector
     auto f = [](unsigned n, unsigned m, uint64_t i, const fp_type* v,
                 const uint64_t* ms, const uint64_t* xss, fp_type* rstate) {
       constexpr unsigned hsize = 1 << H;
 
       fp_type rn, in;
-      fp_type rs[hsize], is[hsize];
+      fp_type rs[hsize], is[hsize]; // rs = reals, is = imaginaries
 
-      uint64_t ii = i & ms[0];
+      uint64_t ii = i & ms[0]; // ii = start offset in state vector
       for (unsigned j = 1; j <= H; ++j) {
         i *= 2;
         ii |= i & ms[j];
       }
 
-      auto p0 = rstate + 2 * ii;
+      auto p0 = rstate + 2 * ii; // pointer to start index in state vector
 
       for (unsigned k = 0; k < hsize; ++k) {
         rs[k] = *(p0 + xss[k]);
@@ -204,12 +213,78 @@ class SimulatorBasic final : public SimulatorBase {
     uint64_t ms[H + 1];
     uint64_t xss[1 << H];
 
+
     FillIndices<H>(state.num_qubits(), qs, ms, xss);
 
     unsigned n = state.num_qubits() > H ? state.num_qubits() - H : 0;
     uint64_t size = uint64_t{1} << n;
 
+    if (test_counter < 6) {
+        printf("test #%d\n", test_counter);
+        printf("writing pre buffers to file...\n");
+        char file_name[20];
+        sprintf(file_name, "test%d_pre.bin", test_counter);
+        FILE *test_file = fopen(file_name, "wb");
+        unsigned local_h = H;
+        uint64_t local_num_qubits = state.num_qubits();
+        if (test_file) {
+            fwrite(&local_h, sizeof(unsigned), 1, test_file);
+            fwrite(&local_num_qubits, sizeof(uint64_t), 1, test_file);
+            fwrite(&size, sizeof(uint64_t), 1, test_file);
+            fwrite(ms, sizeof(uint64_t), H + 1, test_file);
+            fwrite(xss, sizeof(uint64_t), 1 << H, test_file);
+            fwrite(matrix, sizeof(fp_type), (1 << H) * (1 << H), test_file);
+            fwrite(state.get(), sizeof(fp_type), 2 * (1 << state.num_qubits()), test_file);
+            printf("finished writing buffers...\n");
+        }
+        fclose(test_file);
+        unsigned h_read;
+        uint64_t size_read;
+        uint64_t q_read;
+        uint64_t ms_read[H + 1];
+        uint64_t xss_read[1 << H];
+        fp_type matrix_read[(1 << H) * (1 << H)];
+        fp_type state_read[2 * 1 << state.num_qubits()];
+        FILE *read_test_file = fopen(file_name, "rb");
+        if (read_test_file) {
+            fread(&h_read, sizeof(unsigned), 1, read_test_file);
+            fread(&q_read, sizeof(uint64_t), 1, read_test_file);
+            fread(&size_read, sizeof(uint64_t), 1, read_test_file);
+            fread(ms_read, sizeof(uint64_t), H + 1, read_test_file);
+            fread(xss_read, sizeof(uint64_t), 1 << H, read_test_file);
+            fread(matrix_read, sizeof(fp_type), (1 << H) * (1 << H), read_test_file);
+            fread(state_read, sizeof(fp_type), 2 * (1 << state.num_qubits()), read_test_file);
+            fclose(read_test_file);
+        }
+        printf("wrote h: %u\n", local_h);
+        printf("read  h: %u\n", h_read);
+        printf("wrote size: %u\n", size);
+        printf("read  size: %u\n", size_read);
+        printf("wrote qubits: %u\n", state.num_qubits());
+        printf("read  qubits: %u\n", q_read);
+        printf("wrote ms[0]: %u\n", ms[0]);
+        printf("read  ms[0]: %u\n", ms_read[0]);
+        printf("wrote state[0]: %f\n", state.get()[0]);
+        printf("read  state[0]: %f\n", state_read[0]);
+        printf("wrote xss[0]: %u\n", xss[0]);
+        printf("read  xss[0]: %u\n", xss_read[0]);
+    }
+
     for_.Run(size, f, matrix, ms, xss, state.get());
+    if (test_counter < 6) {
+        printf("writing post buffers to file...\n");
+        char file_name[20];
+        sprintf(file_name, "test%d_post.bin", test_counter);
+        FILE *test_file = fopen(file_name, "wb");
+        unsigned local_h = H;
+        if (test_file) {
+            fwrite(state.get(), sizeof(fp_type), 2 * (1 << state.num_qubits()), test_file);
+            printf("finished writing buffers...\n");
+        }
+
+        fclose(test_file);
+    }
+    test_counter++;
   }
 
   template <unsigned H>
